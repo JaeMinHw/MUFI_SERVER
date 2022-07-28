@@ -1,3 +1,3 @@
-# MUFI_SERVER
+# MUFI_KIOSK
 
 -- server development
