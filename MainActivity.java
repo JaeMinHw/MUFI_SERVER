@@ -1,5 +1,6 @@
 package org.techtown.client;
 
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.os.Handler;
@@ -24,16 +25,23 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.io.OutputStream;
+import java.io.StreamCorruptedException;
+import java.net.BindException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.nio.Buffer;
 import java.util.Enumeration;
 
 
@@ -53,9 +61,12 @@ public class MainActivity extends AppCompatActivity {
 
     private ImageView iv;
     private String text;
+    Socket sock;
 
     String memberID;
     String name;
+
+    Handler handler = new Handler();
 
     public static final int REQUEST_CODE_MENU = 101;
     @Override
@@ -63,83 +74,85 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        iv = (ImageView) findViewById(R.id.qrcode);
+        loca = getLocalIpAddress();
+        Log.d("My Ip Address is ", loca);
+        text = loca + "/" + store_num + "/" + kiosk_num;
+
+        MultiFormatWriter multiFormatWriter = new MultiFormatWriter();
+        try {
+            BitMatrix bitMatrix = multiFormatWriter.encode(text, BarcodeFormat.QR_CODE, 200, 200);
+            BarcodeEncoder barcodeEncoder = new BarcodeEncoder();
+            Bitmap bitmap = barcodeEncoder.createBitmap(bitMatrix);
+            iv.setImageBitmap(bitmap);
+        } catch (Exception e) {
+        }
+
         mHandler = new Handler();
         Log.w("connect","연결 하는중");
 // 받아오는거
         Thread checkUpdate = new Thread() {
             public void run() {
+                synchronized (this) {
+                    startServer();
+                    Log.d("DDDDDD", "안아ㅗㅆ음");
 // ip받기
-                String newip = ip;
-
-// 서버 접속
-                try {
-                    socket = new Socket(newip, port);
-                    Log.w("서버 접속됨", "서버 접속됨");
-                } catch (IOException e1) {
-                    Log.w("서버접속못함", "서버접속못함");
-                    e1.printStackTrace();
-                }
-
-                Log.w("edit 넘어가야 할 값 : ","안드로이드에서 서버로 연결요청");
+//                String newip = ip;
+//
+//// 서버 접속
 
 //                try {
-//
-//                    dos.writeObject("안드로이드에서 서버로 연결요청");
-//
-//                } catch (IOException e) {
-//                    e.printStackTrace();
-//                    Log.w("버퍼", "버퍼생성 잘못됨");
-//
+//                    socket = new Socket(loca, port);
+//                    Log.w("서버 접속됨", "서버 접속됨");
+//                } catch (IOException e1) {
+//                    Log.w("서버접속못함", "서버접속못함");
+//                    e1.printStackTrace();
 //                }
-                Log.w("버퍼","버퍼생성 잘됨");
+//
+//                Log.w("edit 넘어가야 할 값 : ","안드로이드에서 서버로 연결요청");
+//
+//
+//                Log.w("버퍼","버퍼생성 잘됨");
+//
 
-                iv = (ImageView)findViewById(R.id.qrcode);
-
-                loca=getLocalIpAddress();
-                Log.d("My Ip Address is ", loca);
-                text =  loca+"/"+store_num+"/"+kiosk_num;
-
-                MultiFormatWriter multiFormatWriter = new MultiFormatWriter();
-                try{
-                    BitMatrix bitMatrix = multiFormatWriter.encode(text, BarcodeFormat.QR_CODE,200,200);
-                    BarcodeEncoder barcodeEncoder = new BarcodeEncoder();
-                    Bitmap bitmap = barcodeEncoder.createBitmap(bitMatrix);
-                    iv.setImageBitmap(bitmap);
-                }catch (Exception e){}
 
 // 서버에서 계속 받아옴 - 한번은 문자, 한번은 숫자를 읽음. 순서 맞춰줘야 함.
 
-                try {
+                    try {
+                        //BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream(), "UTF-8"));
+                        DataInputStream is = new DataInputStream(sock.getInputStream());
+                        //String value = in.readLine();
+                        String value = is.readUTF().toString();
+                        Log.w("JSON_READ_TAG", "서버에서 받아온 값 :" + value);
+                        json = new JSONObject(value);
+                        Log.w("변환한 값 ", " :" + json.toString());
 
-                    //ObjectOutputStream dos = new ObjectOutputStream(socket.getOutputStream()); // output에 보낼꺼 넣음
-                    BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
-                    //DataInputStream dis = new DataInputStream(socket.getInputStream()); // input에 받을꺼 넣어짐
-                    String value=in.readLine();
-                    Log.w("서버에서 받아온 값 "," :"+value);
-                    json = new JSONObject(value);
-                    Log.w("변환한 값 "," :"+json);
+                        memberID = json.getString("userid");
+                        name = json.getString("name");
 
-                    memberID = json.getString("memberID");
-                    name = json.getString("name");
+                        Log.w("멤버 ID : ", "" + memberID);
+                        Log.w("이름 : ", "" + name);
 
-                    Log.w("멤버 ID : ",""+memberID);
-                    Log.w("이름 : ",""+name);
+                        // 화면 전환해서 사용자 이름 출력시키기
+                        Intent intent = new Intent(getApplicationContext(), WhoUser.class);
+                        intent.putExtra("name", name);
+                        startActivityForResult(intent, 1);
 
-                    //println(""+name+"님 안녕하세요");
-                    // 화면 전환해서 사용자 이름 출력시키기
+                    } catch (EOFException e) {
+                        Log.d("JSON_READ_TAG", "EOF 예외: " + e.getMessage());
+                    }
+                    catch (Exception e) {
+                        Log.w("서버에서 받아온 값 ", "뭐애");
+                        e.printStackTrace();
+                    }
 
-                }catch (Exception e){
-                    Log.w("서버에서 받아온 값 ","뭐애");
-                    e.printStackTrace();
                 }
-
             }
         };
 // 소켓 접속 시도, 버퍼생성
         checkUpdate.start();
 
     }
-
 
     public static String getLocalIpAddress() {
         try {
@@ -158,9 +171,55 @@ public class MainActivity extends AppCompatActivity {
         return null;
     }
 
+    public void startServer() {
+        try {
+            int portNumber = 5555;
 
-    public void println(String data) {
-        Toast.makeText(this, data, Toast.LENGTH_LONG).show();
+            ServerSocket server = new ServerSocket();
+            server.setReuseAddress(true);
+            server.bind(new InetSocketAddress(portNumber));
+            printServerLog("서버 시작함 : " + portNumber);
+
+            while (true) {
+                sock = server.accept();
+                InetAddress clientHost = sock.getLocalAddress();
+                int clientPort = sock.getPort();
+                printServerLog("클라이언트 연결됨 : " + clientHost + " : " + clientPort);
+
+                BufferedReader in = new BufferedReader(new InputStreamReader(sock.getInputStream()));
+                //DataInputStream instream = new DataInputStream(sock.getInputStream());
+                //String obj = instream.readLine().toString();
+                String obj = in.readLine();
+                printServerLog("데이터 받음 : " + obj.toString());
+
+                DataOutputStream outstream = new DataOutputStream(sock.getOutputStream());
+                outstream.writeUTF(obj.toString() + " from Server.");
+                outstream.flush();
+                printServerLog("데이터 보냄.");
+
+                //sock.close();
+            }
+        } catch(BindException e) {
+            Log.d("BIND_LOG", "바인드 예오: " + e.getMessage());
+        } catch(StreamCorruptedException e) {
+            Log.d("SCE_LOG", "SCE 예외: " + e.getMessage());
+        }
+        catch (Exception ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    public void printServerLog(final String data) {
+        Log.d("MainActivity", data);
+
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                Log.w("받은 값",""+data);
+            }
+        });
     }
 }
+
+
 
